@@ -42,9 +42,9 @@ def get_wb_product_details_by_articule(art: str) -> dict:
         url     = f"https://www.wildberries.by/catalog/{art}/detail.aspx"
         page.goto(url, wait_until="networkidle")
 
-        name_el  = page.wait_for_selector(".product-page__title",       state="visible", timeout=30000)
+        name_el  = page.wait_for_selector(".product-page__title",       state="visible", timeout=50000)
         final_el = page.locator("ins.price-block__final-price.red-price").first
-        final_el.wait_for(state="visible", timeout=30000)
+        final_el.wait_for(state="visible", timeout=50000)
 
         data = {
             "articule":       art,
@@ -188,7 +188,7 @@ async def compare_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
     }
     if not old_map:
         return await update.message.reply_text(
-            "❗ wb_results.json is empty. Run /scrape first."
+            "❗ wb_results.json is empty. Run /check first."
         )
 
     messages     = []
