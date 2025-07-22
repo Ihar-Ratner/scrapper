@@ -40,11 +40,11 @@ def get_wb_product_details_by_articule(art: str) -> dict:
         browser = p.chromium.launch(channel="chrome", headless=False, args=["--log-level=3"])
         page    = browser.new_page()
         url     = f"https://www.wildberries.by/catalog/{art}/detail.aspx"
-        page.goto(url, wait_until="networkidle")
+        page.goto(url, wait_until="load")
 
-        name_el  = page.wait_for_selector(".product-page__title",       state="visible", timeout=50000)
+        name_el  = page.wait_for_selector(".product-page__title",       state="visible", timeout=60000)
         final_el = page.locator("ins.price-block__final-price.red-price").first
-        final_el.wait_for(state="visible", timeout=50000)
+        final_el.wait_for(state="visible", timeout=60000)
 
         data = {
             "articule":       art,
@@ -156,7 +156,7 @@ async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
         try:
             data = await coro
             results.append(data)
-            replies.append(f"✅ {data['product_name']}: {data['final_price']}")
+            replies.append(f"✅ {data['product_name']}: <b>{data['final_price']}</b>")
         except Exception as e:
             replies.append(f"❌ error: {e}")
 
@@ -167,7 +167,7 @@ async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
     )
 
     # send summary back to user
-    await update.message.reply_text("\n".join(replies))
+    await update.message.reply_text("\n".join(replies), parse_mode=ParseMode.HTML)
 
 
 async def echo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -210,21 +210,23 @@ async def compare_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
             new_price = parse_price(new_data["final_price"])
             old_price, idx = old_map[art]
 
+            product_name = new_data["product_name"]
+
             if new_price != old_price:
                 diff = new_price - old_price
                 sign = "+" if diff > 0 else ""
                 messages.append(
-                    f"🔔 {art}: {old_price:.2f}→{new_price:.2f} ({sign}{diff:.2f})"
+                    f"🔔 {product_name}: {old_price:.2f}→<b>{new_price:.2f}</b> ({sign}{diff:.2f})"
                 )
                 # replace entire record
                 updated_list[idx] = new_data
             else:
-                messages.append(f"ℹ️ {art}: unchanged at {new_price:.2f}")
+                messages.append(f"ℹ️ {product_name}: unchanged at <b>{new_price:.2f}</b>")
                 # just update timestamp in existing record
                 updated_list[idx]["last_execution"] = new_data["last_execution"]
 
         except Exception as e:
-            messages.append(f"❌ {art}: error: {e}")
+            messages.append(f"❌ {product_name}: error: {e}")
 
     # 3) Overwrite JSON with updated_list
     OUTPUT_FILE.write_text(
@@ -233,7 +235,7 @@ async def compare_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
     # 4) Report back
-    await update.message.reply_text("\n".join(messages))
+    await update.message.reply_text("\n".join(messages), parse_mode=ParseMode.HTML)
 
 
 # ─── Main Entrypoint ─────────────────────────────────────────────────────────
