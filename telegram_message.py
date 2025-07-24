@@ -95,6 +95,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         f"Hi {user.mention_markdown_v2()}\\!  \n"
         "Send `/check <articule>` to fetch product details\.\n"
         "`/add <id1,id2,…>` to add new articules\.\n"
+        "`/show` to get articule: product name that you are currently tracking\.\n"
+        "`/remove <art1,art2,…> or /remove art1 art2` to remove some products from you tracking list\.\n"
         "`/compare` to compare latest prices with current ones\."
     )
     await update.message.reply_text(
@@ -237,6 +239,68 @@ async def compare_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
     # 4) Report back
     await update.message.reply_text("\n".join(messages), parse_mode=ParseMode.HTML)
 
+### SHOW
+async def show_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    if not OUTPUT_FILE.exists():
+        return await update.message.reply_text("❗ No tracked products. Run /scrape first.")
+
+    try:
+        data = json.loads(OUTPUT_FILE.read_text("utf-8"))
+        if not data:
+            return await update.message.reply_text("⚠️ No product data found.")
+
+        lines = [
+            f"📦 <b>{item['articule']}</b>: {item['product_name']}"
+            for item in data
+        ]
+        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error reading data: {e}")
+
+async def remove_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    raw = " ".join(ctx.args).strip()
+    if not raw:
+        return await update.message.reply_text(
+            "Usage: /remove <art1,art2,…> or /remove art1 art2"
+        )
+
+    # Parse IDs the same way you do in /add
+    parts    = re.split(r"[,\s;]+", raw)
+    to_remove = {p.strip() for p in parts if p.strip()}
+
+    # Load existing articules
+    existing = load_articules()
+    if not existing:
+        return await update.message.reply_text("❗ No articules to remove.")
+
+    kept      = []
+    removed   = []
+    for art in existing:
+        if art in to_remove:
+            removed.append(art)
+        else:
+            kept.append(art)
+
+    if not removed:
+        return await update.message.reply_text(
+            f"ℹ️ None of {', '.join(to_remove)} were in your list."
+        )
+
+    # Overwrite articules file with kept ones
+    ARTICULES_FILE.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+    # Also remove from OUTPUT_FILE if it exists
+    if OUTPUT_FILE.exists():
+        data = json.loads(OUTPUT_FILE.read_text("utf-8"))
+        data = [item for item in data if item["articule"] not in to_remove]
+        OUTPUT_FILE.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8"
+        )
+
+    await update.message.reply_text(
+        f"✅ Removed {len(removed)} articule(s): {', '.join(removed)}"
+    )
 
 # ─── Main Entrypoint ─────────────────────────────────────────────────────────
 def main():
@@ -252,6 +316,8 @@ def main():
     app.add_handler(CommandHandler("add",    add_command))
     app.add_handler(CommandHandler("check", scrape_command))
     app.add_handler(CommandHandler("compare", compare_command))
+    app.add_handler(CommandHandler("show", show_command))
+    app.add_handler(CommandHandler("remove", remove_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
 
     app.run_polling()
