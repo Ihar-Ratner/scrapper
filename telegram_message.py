@@ -6,6 +6,8 @@ import asyncio
 from datetime import datetime
 from pathlib import Path
 from telegram.constants import ParseMode
+from datetime import timedelta
+
 
 
 from telegram import ForceReply, Update
@@ -90,6 +92,265 @@ def save_results_for(user_id: int, data: list[dict]) -> None:
         encoding="utf-8"
     )
 
+### Persisting Subscribers & Intervals ###
+from pathlib import Path
+import json
+
+SUB_FILE      = Path("subscribers.txt")
+INTERVAL_FILE = Path("intervals.json")
+
+def load_subscribers() -> set[int]:
+    if not SUB_FILE.exists():
+        return set()
+    return {int(u) for u in SUB_FILE.read_text().splitlines() if u}
+
+def save_subscribers(subs: set[int]) -> None:
+    SUB_FILE.write_text("\n".join(str(u) for u in subs) + "\n")
+
+def load_intervals() -> dict[str, int]:
+    if not INTERVAL_FILE.exists():
+        return {}
+    return json.loads(INTERVAL_FILE.read_text())
+
+def save_intervals(data: dict[str, int]) -> None:
+    INTERVAL_FILE.write_text(json.dumps(data, indent=2))
+### Persisting Subscribers & Intervals ###
+
+
+### Helper to (Re)Schedule a User’s Job ###
+def schedule_compare_for(user_id: int, queue, interval: int):
+    job_name = f"compare_{user_id}"
+    # remove any existing job for this user
+    for job in queue.get_jobs_by_name(job_name):
+        job.schedule_removal()
+
+    # schedule a new repeating job
+    queue.run_repeating(
+        callback=broadcast_one_user,
+        interval=interval,
+        first=interval,
+        chat_id=user_id,
+        name=job_name
+    )
+
+async def do_compare_for(user_id: int) -> list[str]:
+    # 1) Load user’s existing data
+    old_list = load_results_for(user_id)
+    if not old_list:
+        return ["❗ No previous data. Run /check first."]
+
+    # 2) Build the old_map …
+    old_map = {
+        item["articule"]: (parse_price(item["final_price"]), idx)
+        for idx, item in enumerate(old_list)
+    }
+
+    messages     = []
+    updated_list = old_list.copy()
+
+    # 3) Kick off parallel scrapes
+    tasks = {
+        art: asyncio.create_task(scrape_in_thread(art))
+        for art in old_map
+    }
+
+    for art, task in tasks.items():
+        try:
+            new_data = await task
+            now_ts   = datetime.utcnow().replace(microsecond=0).isoformat()
+            new_data["last_execution"] = now_ts
+
+            old_price, idx = old_map[art]
+            new_price      = parse_price(new_data["final_price"])
+            name           = new_data["product_name"]
+            diff           = new_price - old_price
+            sign           = "+" if diff > 0 else ""
+
+            if new_price != old_price:
+                messages.append(
+                    f"🔔 {name}: {old_price:.2f} → <b>{new_price:.2f}</b> ({sign}{diff:.2f})"
+                )
+                updated_list[idx] = new_data
+            else:
+                messages.append(
+                    f"ℹ️ {name}: unchanged at <b>{new_price:.2f}</b>"
+                )
+                updated_list[idx]["last_execution"] = now_ts
+
+        except Exception as e:
+            messages.append(f"❌ {art}: error: {e}")
+
+    # 4) Persist the updated list
+    save_results_for(user_id, updated_list)
+
+    return messages
+### Helper to (Re)Schedule a User’s Job ###
+
+### Core Broadcast Callback ###
+async def broadcast_one_user(context: ContextTypes.DEFAULT_TYPE):
+    user_id = context.job.chat_id
+    #messages = await compute_compare_messages_for(user_id)
+    messages = await do_compare_for(user_id)
+
+    if messages:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="\n".join(messages),
+            parse_mode=ParseMode.HTML
+        )
+### Core Broadcast Callback ###
+
+### /subscribe, /unsubscribe, /setinterval Handlers ###
+async def subscribe_command(update, ctx):
+    user_id = update.effective_user.id
+    subs    = load_subscribers()
+    if user_id in subs:
+        return await update.message.reply_text("✅ Already subscribed.")
+
+    subs.add(user_id)
+    save_subscribers(subs)
+
+    # pick their stored interval or default to 300s
+    intervals = load_intervals()
+    interval  = intervals.get(str(user_id), 300)
+    schedule_compare_for(user_id, ctx.job_queue, interval)
+
+    await update.message.reply_text(f"🟢 Subscribed! You’ll get updates every {interval//60} min.")
+
+async def unsubscribe_command(update, ctx):
+    user_id = update.effective_user.id
+    subs    = load_subscribers()
+    if user_id not in subs:
+        return await update.message.reply_text("ℹ️ You’re not subscribed.")
+
+    subs.remove(user_id)
+    save_subscribers(subs)
+
+    # remove their scheduled job
+    for job in ctx.job_queue.get_jobs_by_name(f"compare_{user_id}"):
+        job.schedule_removal()
+
+    await update.message.reply_text("🔴 Unsubscribed from periodic updates.")
+
+async def setinterval_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    try:
+        # 1) Ensure the user supplied an argument
+        if not ctx.args:
+            return await update.message.reply_text(
+                "Usage: /setinterval <minutes>"
+            )
+
+        # 2) Parse & validate
+        try:
+            minutes = int(ctx.args[0])
+            if minutes <= 0:
+                raise ValueError()
+        except ValueError:
+            return await update.message.reply_text(
+                "Please provide a positive integer for minutes."
+            )
+
+        user_id = update.effective_user.id
+
+        # 3) Remove any existing job(s) named for this user
+        existing = ctx.job_queue.get_jobs_by_name(str(user_id))
+        for job in existing:
+            job.schedule_removal()
+
+        # 4) Schedule the repeating job with the new interval
+        ctx.job_queue.run_repeating(
+            broadcast_one_user,               # your callback
+            interval=timedelta(minutes=minutes),
+            first=0,                          # run immediately
+            chat_id=update.effective_chat.id,   # ← pass the chat ID here
+            name=str(update.effective_chat.id),
+            # name=str(user_id),                # so get_jobs_by_name() finds it
+            # data=user_id                      # passed into context.job.data
+        )
+
+        # 5) Confirm to the user
+        await update.message.reply_text(
+            f"⏰ Interval set to {minutes} min."
+        )
+
+    except Exception as e:
+        # Log full traceback to console
+        traceback.print_exc()
+        # Inform the user something went wrong
+        await update.message.reply_text(
+            f"❌ Failed to set interval: {e}"
+        )
+
+# async def setinterval_command(update, ctx):
+#     user_id = update.effective_user.id
+#     if not ctx.args or not ctx.args[0].isdigit():
+#         return await update.message.reply_text("Usage: /setinterval <minutes>")
+
+#     minutes = int(ctx.args[0])
+#     seconds = minutes * 60
+
+#     # store their preference
+#     intervals = load_intervals()
+#     intervals[str(user_id)] = seconds
+#     save_intervals(intervals)
+
+#     await update.message.reply_text(f"⏰ Interval set to {minutes} min.")
+
+#     # if they’re already subscribed, reschedule
+#     if user_id in load_subscribers():
+#         schedule_compare_for(user_id, ctx.job_queue, seconds)
+async def setinterval_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    try:
+        # 1) Ensure the user supplied an argument
+        if not ctx.args:
+            return await update.message.reply_text(
+                "Usage: /setinterval <minutes>"
+            )
+
+        # 2) Parse & validate
+        try:
+            minutes = int(ctx.args[0])
+            if minutes <= 0:
+                raise ValueError()
+        except ValueError:
+            return await update.message.reply_text(
+                "Please provide a positive integer for minutes."
+            )
+
+        user_id = update.effective_user.id
+
+        # 3) Remove any existing job(s) named for this user
+        existing = ctx.job_queue.get_jobs_by_name(str(user_id))
+        for job in existing:
+            job.schedule_removal()
+
+        # 4) Schedule the repeating job with the new interval
+        ctx.job_queue.run_repeating(
+            broadcast_one_user,               # your callback
+            interval=timedelta(minutes=minutes),
+            first=0,                          # run immediately
+            chat_id=update.effective_chat.id,   # ← pass the chat ID here
+            name=str(update.effective_chat.id),
+            # name=str(user_id),                # so get_jobs_by_name() finds it
+            # data=user_id                      # passed into context.job.data
+        )
+
+        # 5) Confirm to the user
+        await update.message.reply_text(
+            f"⏰ Interval set to {minutes} min."
+        )
+
+    except Exception as e:
+        # Log full traceback to console
+        traceback.print_exc()
+        # Inform the user something went wrong
+        await update.message.reply_text(
+            f"❌ Failed to set interval: {e}"
+        )
+
+
+### /subscribe, /unsubscribe, /setinterval Handlers ###
+
 # ─── Sync Scraper ────────────────────────────────────────────────────────────
 def get_wb_product_details_by_articule(art: str) -> dict:
     with sync_playwright() as p:
@@ -149,11 +410,18 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     text = (
         f"Hi {user.mention_markdown_v2()}\\!  \n"
+        "To start using this bot, you have to prepare your data:\n"
+        "1\. Add product with `add` command\n"
+        "2\. Execute `check` command to collect data about interested product\n"
+        "3\. Read instructions below to manage your tracking list\n\n\n"
         "Send `/check <articule>` to fetch product details\.\n"
         "`/add <id1,id2,…>` to add new articules\.\n"
-        "`/show` to get articule: product name that you are currently tracking\.\n"
         "`/remove <art1,art2,…> or /remove art1 art2` to remove some products from you tracking list\.\n"
-        "`/compare` to compare latest prices with current ones\."
+        "`/show` to get articule: product name that you are currently tracking\.\n"
+        "`/compare` to compare latest prices with current ones\.\n"
+        "`/subscribe` to start product tracking \(default value is evey 5 mins\)\.\n"
+        "`/unsubscribe` to stop product tracking\.\n"
+        "`/setinterval <minutes>` to set up your own tracking interval if you are subscribed\.\n"
     )
     await update.message.reply_text(
         text,
@@ -164,22 +432,6 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 async def help_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await start(update, ctx)
 
-# async def add_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-#     """
-#     /add <id> or /add <id1,id2,id3> or /add id1 id2
-#     """
-#     raw = " ".join(ctx.args).strip()
-#     if not raw:
-#         return await update.message.reply_text("Usage: /add <articule1,articule2 ...>")
-
-#     # split on commas, semicolons or whitespace
-#     parts = re.split(r"[,\s;]+", raw)
-#     new_ids = [p for p in (pt.strip() for pt in parts) if p]
-
-#     added, skipped = append_articules(new_ids)
-#     await update.message.reply_text(
-#         f"✅ Added {added} articule(s), skipped {skipped} already present."
-#     )
 
 async def add_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """
@@ -198,52 +450,6 @@ async def add_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"✅ Added {added} articule(s), skipped {skipped} duplicates."
     )
 
-
-# async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-#     arts = load_articules()
-#     if not arts:
-#         return await update.message.reply_text("❗ No articules to scrape. Add some with /add.")
-#     messages = []
-#     for art in arts:
-#         try:
-#             data = await scrape_in_thread(art)
-#             messages.append(
-#                 f"🛍️ {data['product_name']} ({art})\n"
-#                 f"💰 {data['final_price']}  ⏰ {data['last_execution']}"
-#             )
-#         except Exception as e:
-#             messages.append(f"❌ {art} – error: {e}")
-
-#     await update.message.reply_text("\n\n".join(messages))
-
-# async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-#     # load your articules
-#     if ARTICULES_FILE.exists():
-#         arts = [l.strip() for l in ARTICULES_FILE.read_text("utf-8").splitlines() if l.strip()]
-#     else:
-#         return await update.message.reply_text("❗ No articules to scrape.")
-
-#     results = []
-#     replies = []
-
-#     # fire off scrapes in parallel
-#     tasks = [scrape_in_thread(art) for art in arts]
-#     for coro in asyncio.as_completed(tasks):
-#         try:
-#             data = await coro
-#             results.append(data)
-#             replies.append(f"✅ {data['product_name']}: <b>{data['final_price']}</b>")
-#         except Exception as e:
-#             replies.append(f"❌ error: {e}")
-
-#     # write JSON file
-#     OUTPUT_FILE.write_text(
-#         json.dumps(results, ensure_ascii=False, indent=2),
-#         encoding="utf-8"
-#     )
-
-#     # send summary back to user
-#     await update.message.reply_text("\n".join(replies), parse_mode=ParseMode.HTML)
 
 async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -277,96 +483,78 @@ async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def echo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(update.message.text)
 
+async def compare_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user_id  = update.effective_user.id
+    messages = await do_compare_for(user_id)
 
-async def compare_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-   
-    user_id = update.effective_user.id
-    old_list = load_results_for(user_id)
-
-    # 1) Load existing JSON
-    if not OUTPUT_FILE.exists():
-        return await update.message.reply_text(
-            "❗ No previous data. Run /scrape first to create wb_results.json."
-        )
-
-    old_list = json.loads(OUTPUT_FILE.read_text("utf-8"))
-    # Map articule -> (old_price, index)
-    old_map = {
-        item["articule"]: (parse_price(item["final_price"]), idx)
-        for idx, item in enumerate(old_list)
-    }
-    if not old_map:
-        return await update.message.reply_text(
-            "❗ wb_results.json is empty. Run /check first."
-        )
-
-    messages     = []
-    updated_list = old_list.copy()
-    now_ts       = datetime.utcnow().replace(microsecond=0).isoformat()
-
-    # 2) Scrape in parallel
-    tasks = {
-        art: asyncio.create_task(scrape_in_thread(art))
-        for art in old_map
-    }
-
-    for art, task in tasks.items():
-        try:
-            new_data = await task
-            # normalize timestamp (drop microseconds, no Z)
-            new_data["last_execution"] = datetime.utcnow().replace(microsecond=0).isoformat()
-
-            new_price = parse_price(new_data["final_price"])
-            old_price, idx = old_map[art]
-
-            product_name = new_data["product_name"]
-
-            if new_price != old_price:
-                diff = new_price - old_price
-                sign = "+" if diff > 0 else ""
-                messages.append(
-                    f"🔔 {product_name}: {old_price:.2f}→<b>{new_price:.2f}</b> ({sign}{diff:.2f})"
-                )
-                # replace entire record
-                updated_list[idx] = new_data
-            else:
-                messages.append(f"ℹ️ {product_name}: unchanged at <b>{new_price:.2f}</b>")
-                # just update timestamp in existing record
-                updated_list[idx]["last_execution"] = new_data["last_execution"]
-
-        except Exception as e:
-            messages.append(f"❌ {product_name}: error: {e}")
-
-    # 3) Overwrite JSON with updated_list
-    OUTPUT_FILE.write_text(
-        json.dumps(updated_list, ensure_ascii=False, indent=2),
-        encoding="utf-8"
+    await update.message.reply_text(
+        "\n".join(messages),
+        parse_mode=ParseMode.HTML
     )
 
-    # 4) Report back
-    save_results_for(user_id, updated_list)
-    await update.message.reply_text("\n".join(messages), parse_mode=ParseMode.HTML)
+# async def compare_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+#     user_id = update.effective_user.id
 
-    #await update.message.reply_text("\n".join(messages), parse_mode=ParseMode.HTML)
+#     # 1) Load this user’s previous results
+#     old_list = load_results_for(user_id)
+#     if not old_list:
+#         return await update.message.reply_text(
+#             "❗ No previous data. Run /check first to create your history."
+#         )
+
+#     # 2) Build a map: articule -> (old_price, index)
+#     old_map = {
+#         item["articule"]: (parse_price(item["final_price"]), idx)
+#         for idx, item in enumerate(old_list)
+#     }
+#     if not old_map:
+#         return await update.message.reply_text(
+#             "❗ Your history is empty. Run /check first."
+#         )
+
+#     messages     = []
+#     updated_list = old_list.copy()
+
+#     # 3) Scrape all in parallel
+#     tasks = {
+#         art: asyncio.create_task(scrape_in_thread(art))
+#         for art in old_map
+#     }
+
+#     for art, task in tasks.items():
+#         try:
+#             new_data = await task
+#             now_ts   = datetime.utcnow().replace(microsecond=0).isoformat()
+#             new_data["last_execution"] = now_ts
+
+#             old_price, idx = old_map[art]
+#             new_price      = parse_price(new_data["final_price"])
+#             name           = new_data["product_name"]
+#             diff           = new_price - old_price
+#             sign           = "+" if diff > 0 else ""
+
+#             if new_price != old_price:
+#                 messages.append(
+#                     f"🔔 {name}: {old_price:.2f} → <b>{new_price:.2f}</b> ({sign}{diff:.2f})"
+#                 )
+#                 updated_list[idx] = new_data
+#             else:
+#                 messages.append(f"ℹ️ {name}: unchanged at <b>{new_price:.2f}</b>")
+#                 updated_list[idx]["last_execution"] = now_ts
+
+#         except Exception as e:
+#             messages.append(f"❌ {art}: error: {e}")
+
+#     # 4) Save back to the user’s JSON
+#     save_results_for(user_id, updated_list)
+
+#     # 5) Send the diff report
+#     await update.message.reply_text(
+#         "\n".join(messages),
+#         parse_mode=ParseMode.HTML
+#     )
 
 ### SHOW
-# async def show_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-#     if not OUTPUT_FILE.exists():
-#         return await update.message.reply_text("❗ No tracked products. Run /scrape first.")
-
-#     try:
-#         data = json.loads(OUTPUT_FILE.read_text("utf-8"))
-#         if not data:
-#             return await update.message.reply_text("⚠️ No product data found.")
-
-#         lines = [
-#             f"📦 <b>{item['articule']}</b>: {item['product_name']}"
-#             for item in data
-#         ]
-#         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
-#     except Exception as e:
-#         await update.message.reply_text(f"❌ Error reading data: {e}")
-
 async def show_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     results = load_results_for(user_id)
@@ -378,52 +566,6 @@ async def show_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         for item in results
     ]
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
-
-
-# async def remove_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-#     raw = " ".join(ctx.args).strip()
-#     if not raw:
-#         return await update.message.reply_text(
-#             "Usage: /remove <art1,art2,…> or /remove art1 art2"
-#         )
-
-#     # Parse IDs the same way you do in /add
-#     parts    = re.split(r"[,\s;]+", raw)
-#     to_remove = {p.strip() for p in parts if p.strip()}
-
-#     # Load existing articules
-#     existing = load_articules()
-#     if not existing:
-#         return await update.message.reply_text("❗ No articules to remove.")
-
-#     kept      = []
-#     removed   = []
-#     for art in existing:
-#         if art in to_remove:
-#             removed.append(art)
-#         else:
-#             kept.append(art)
-
-#     if not removed:
-#         return await update.message.reply_text(
-#             f"ℹ️ None of {', '.join(to_remove)} were in your list."
-#         )
-
-#     # Overwrite articules file with kept ones
-#     ARTICULES_FILE.write_text("\n".join(kept) + "\n", encoding="utf-8")
-
-#     # Also remove from OUTPUT_FILE if it exists
-#     if OUTPUT_FILE.exists():
-#         data = json.loads(OUTPUT_FILE.read_text("utf-8"))
-#         data = [item for item in data if item["articule"] not in to_remove]
-#         OUTPUT_FILE.write_text(
-#             json.dumps(data, ensure_ascii=False, indent=2),
-#             encoding="utf-8"
-#         )
-
-#     await update.message.reply_text(
-#         f"✅ Removed {len(removed)} articule(s): {', '.join(removed)}"
-#     )
 
 async def remove_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -478,7 +620,17 @@ def main():
     app.add_handler(CommandHandler("compare", compare_command))
     app.add_handler(CommandHandler("show", show_command))
     app.add_handler(CommandHandler("remove", remove_command))
+    app.add_handler(CommandHandler("subscribe",   subscribe_command))
+    app.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
+    app.add_handler(CommandHandler("setinterval", setinterval_command))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo))
+
+    # Restore jobs for existing subscribers
+    subs      = load_subscribers()
+    intervals = load_intervals()
+    for uid in subs:
+        interval = intervals.get(str(uid), 300)
+        schedule_compare_for(uid, app.job_queue, interval)
 
     app.run_polling()
 
