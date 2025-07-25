@@ -19,6 +19,7 @@ from telegram.ext import (
 
 from playwright.sync_api import sync_playwright
 
+
 # ─── Logging Configuration ───────────────────────────────────────────────────
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
@@ -30,9 +31,64 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
+DATA_ROOT = Path("data")  # top-level folder for all users
+
 # ─── File Paths ──────────────────────────────────────────────────────────────
 ARTICULES_FILE = Path("wb_articules.txt")
 OUTPUT_FILE    = Path("wb_results.json")
+
+# define users paths
+def user_paths(user_id: int) -> tuple[Path, Path]:
+    """
+    Returns (articules_file, results_file) for the given user_id.
+    Ensures the user directory exists.
+    """
+    user_dir = DATA_ROOT / str(user_id)
+    user_dir.mkdir(parents=True, exist_ok=True)
+    return (
+        user_dir / "articules.txt",
+        user_dir / "results.json"
+    )
+
+def load_articules_for(user_id: int) -> list[str]:
+    articules_file, _ = user_paths(user_id)
+    if not articules_file.exists():
+        return []
+    return [
+        line.strip()
+        for line in articules_file.read_text("utf-8").splitlines()
+        if line.strip()
+    ]
+
+def append_articules_for(user_id: int, new_items: list[str]) -> tuple[int, int]:
+    articules_file, _ = user_paths(user_id)
+    existing = set(load_articules_for(user_id))
+    added = skipped = 0
+
+    with articules_file.open("a", encoding="utf-8") as f:
+        for art in new_items:
+            if art in existing:
+                skipped += 1
+            else:
+                f.write(art + "\n")
+                existing.add(art)
+                added += 1
+
+    return added, skipped
+
+def load_results_for(user_id: int) -> list[dict]:
+    _, results_file = user_paths(user_id)
+    if not results_file.exists():
+        return []
+    return json.loads(results_file.read_text("utf-8"))
+
+def save_results_for(user_id: int, data: list[dict]) -> None:
+    _, results_file = user_paths(user_id)
+    results_file.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8"
+    )
 
 # ─── Sync Scraper ────────────────────────────────────────────────────────────
 def get_wb_product_details_by_articule(art: str) -> dict:
@@ -108,22 +164,40 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 async def help_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await start(update, ctx)
 
+# async def add_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+#     """
+#     /add <id> or /add <id1,id2,id3> or /add id1 id2
+#     """
+#     raw = " ".join(ctx.args).strip()
+#     if not raw:
+#         return await update.message.reply_text("Usage: /add <articule1,articule2 ...>")
+
+#     # split on commas, semicolons or whitespace
+#     parts = re.split(r"[,\s;]+", raw)
+#     new_ids = [p for p in (pt.strip() for pt in parts) if p]
+
+#     added, skipped = append_articules(new_ids)
+#     await update.message.reply_text(
+#         f"✅ Added {added} articule(s), skipped {skipped} already present."
+#     )
+
 async def add_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """
     /add <id> or /add <id1,id2,id3> or /add id1 id2
     """
-    raw = " ".join(ctx.args).strip()
+    user_id = update.effective_user.id
+    raw     = " ".join(ctx.args).strip()
     if not raw:
-        return await update.message.reply_text("Usage: /add <articule1,articule2 ...>")
+        return await update.message.reply_text("Usage: /add <art1,art2 …>")
 
-    # split on commas, semicolons or whitespace
-    parts = re.split(r"[,\s;]+", raw)
-    new_ids = [p for p in (pt.strip() for pt in parts) if p]
+    parts    = re.split(r"[,\s;]+", raw)
+    new_ids  = [p for p in (pt.strip() for pt in parts) if p]
+    added, skipped = append_articules_for(user_id, new_ids)
 
-    added, skipped = append_articules(new_ids)
     await update.message.reply_text(
-        f"✅ Added {added} articule(s), skipped {skipped} already present."
+        f"✅ Added {added} articule(s), skipped {skipped} duplicates."
     )
+
 
 # async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 #     arts = load_articules()
@@ -142,18 +216,47 @@ async def add_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 #     await update.message.reply_text("\n\n".join(messages))
 
-async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    # load your articules
-    if ARTICULES_FILE.exists():
-        arts = [l.strip() for l in ARTICULES_FILE.read_text("utf-8").splitlines() if l.strip()]
-    else:
-        return await update.message.reply_text("❗ No articules to scrape.")
+# async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+#     # load your articules
+#     if ARTICULES_FILE.exists():
+#         arts = [l.strip() for l in ARTICULES_FILE.read_text("utf-8").splitlines() if l.strip()]
+#     else:
+#         return await update.message.reply_text("❗ No articules to scrape.")
 
-    results = []
-    replies = []
+#     results = []
+#     replies = []
 
-    # fire off scrapes in parallel
+#     # fire off scrapes in parallel
+#     tasks = [scrape_in_thread(art) for art in arts]
+#     for coro in asyncio.as_completed(tasks):
+#         try:
+#             data = await coro
+#             results.append(data)
+#             replies.append(f"✅ {data['product_name']}: <b>{data['final_price']}</b>")
+#         except Exception as e:
+#             replies.append(f"❌ error: {e}")
+
+#     # write JSON file
+#     OUTPUT_FILE.write_text(
+#         json.dumps(results, ensure_ascii=False, indent=2),
+#         encoding="utf-8"
+#     )
+
+#     # send summary back to user
+#     await update.message.reply_text("\n".join(replies), parse_mode=ParseMode.HTML)
+
+async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    # 1. Load their articules
+    arts = load_articules_for(user_id)
+    if not arts:
+        return await update.message.reply_text("❗ You have no articules. Use /add first.")
+
+    # 2. Kick off parallel scrapes
     tasks = [scrape_in_thread(art) for art in arts]
+    results, replies = [], []
+
     for coro in asyncio.as_completed(tasks):
         try:
             data = await coro
@@ -162,20 +265,24 @@ async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
         except Exception as e:
             replies.append(f"❌ error: {e}")
 
-    # write JSON file
-    OUTPUT_FILE.write_text(
-        json.dumps(results, ensure_ascii=False, indent=2),
-        encoding="utf-8"
+    # 3. Persist per-user JSON
+    save_results_for(user_id, results)
+
+    # 4. Send summary
+    await update.message.reply_text(
+        "\n".join(replies),
+        parse_mode=ParseMode.HTML
     )
-
-    # send summary back to user
-    await update.message.reply_text("\n".join(replies), parse_mode=ParseMode.HTML)
-
 
 async def echo(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(update.message.text)
 
+
 async def compare_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+   
+    user_id = update.effective_user.id
+    old_list = load_results_for(user_id)
+
     # 1) Load existing JSON
     if not OUTPUT_FILE.exists():
         return await update.message.reply_text(
@@ -237,44 +344,101 @@ async def compare_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
     # 4) Report back
+    save_results_for(user_id, updated_list)
     await update.message.reply_text("\n".join(messages), parse_mode=ParseMode.HTML)
 
+    #await update.message.reply_text("\n".join(messages), parse_mode=ParseMode.HTML)
+
 ### SHOW
-async def show_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    if not OUTPUT_FILE.exists():
-        return await update.message.reply_text("❗ No tracked products. Run /scrape first.")
+# async def show_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+#     if not OUTPUT_FILE.exists():
+#         return await update.message.reply_text("❗ No tracked products. Run /scrape first.")
 
-    try:
-        data = json.loads(OUTPUT_FILE.read_text("utf-8"))
-        if not data:
-            return await update.message.reply_text("⚠️ No product data found.")
+#     try:
+#         data = json.loads(OUTPUT_FILE.read_text("utf-8"))
+#         if not data:
+#             return await update.message.reply_text("⚠️ No product data found.")
 
-        lines = [
-            f"📦 <b>{item['articule']}</b>: {item['product_name']}"
-            for item in data
-        ]
-        await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
-    except Exception as e:
-        await update.message.reply_text(f"❌ Error reading data: {e}")
+#         lines = [
+#             f"📦 <b>{item['articule']}</b>: {item['product_name']}"
+#             for item in data
+#         ]
+#         await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+#     except Exception as e:
+#         await update.message.reply_text(f"❌ Error reading data: {e}")
 
-async def remove_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    raw = " ".join(ctx.args).strip()
+async def show_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    results = load_results_for(user_id)
+    if not results:
+        return await update.message.reply_text("❗ No products tracked yet.")
+
+    lines = [
+        f"📦 <b>{item['articule']}</b>: {item['product_name']}"
+        for item in results
+    ]
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+# async def remove_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+#     raw = " ".join(ctx.args).strip()
+#     if not raw:
+#         return await update.message.reply_text(
+#             "Usage: /remove <art1,art2,…> or /remove art1 art2"
+#         )
+
+#     # Parse IDs the same way you do in /add
+#     parts    = re.split(r"[,\s;]+", raw)
+#     to_remove = {p.strip() for p in parts if p.strip()}
+
+#     # Load existing articules
+#     existing = load_articules()
+#     if not existing:
+#         return await update.message.reply_text("❗ No articules to remove.")
+
+#     kept      = []
+#     removed   = []
+#     for art in existing:
+#         if art in to_remove:
+#             removed.append(art)
+#         else:
+#             kept.append(art)
+
+#     if not removed:
+#         return await update.message.reply_text(
+#             f"ℹ️ None of {', '.join(to_remove)} were in your list."
+#         )
+
+#     # Overwrite articules file with kept ones
+#     ARTICULES_FILE.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+#     # Also remove from OUTPUT_FILE if it exists
+#     if OUTPUT_FILE.exists():
+#         data = json.loads(OUTPUT_FILE.read_text("utf-8"))
+#         data = [item for item in data if item["articule"] not in to_remove]
+#         OUTPUT_FILE.write_text(
+#             json.dumps(data, ensure_ascii=False, indent=2),
+#             encoding="utf-8"
+#         )
+
+#     await update.message.reply_text(
+#         f"✅ Removed {len(removed)} articule(s): {', '.join(removed)}"
+#     )
+
+async def remove_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    raw     = " ".join(ctx.args).strip()
     if not raw:
-        return await update.message.reply_text(
-            "Usage: /remove <art1,art2,…> or /remove art1 art2"
-        )
+        return await update.message.reply_text("Usage: /remove <art1,art2 …>")
 
-    # Parse IDs the same way you do in /add
-    parts    = re.split(r"[,\s;]+", raw)
+    parts     = re.split(r"[,\s;]+", raw)
     to_remove = {p.strip() for p in parts if p.strip()}
 
-    # Load existing articules
-    existing = load_articules()
+    existing = load_articules_for(user_id)
     if not existing:
         return await update.message.reply_text("❗ No articules to remove.")
 
-    kept      = []
-    removed   = []
+    kept, removed = [], []
     for art in existing:
         if art in to_remove:
             removed.append(art)
@@ -283,20 +447,16 @@ async def remove_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
 
     if not removed:
         return await update.message.reply_text(
-            f"ℹ️ None of {', '.join(to_remove)} were in your list."
+            f"ℹ️ None of {', '.join(to_remove)} found."
         )
 
-    # Overwrite articules file with kept ones
-    ARTICULES_FILE.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    articules_file, results_file = user_paths(user_id)
+    articules_file.write_text("\n".join(kept) + "\n", encoding="utf-8")
 
-    # Also remove from OUTPUT_FILE if it exists
-    if OUTPUT_FILE.exists():
-        data = json.loads(OUTPUT_FILE.read_text("utf-8"))
+    if results_file.exists():
+        data = load_results_for(user_id)
         data = [item for item in data if item["articule"] not in to_remove]
-        OUTPUT_FILE.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8"
-        )
+        save_results_for(user_id, data)
 
     await update.message.reply_text(
         f"✅ Removed {len(removed)} articule(s): {', '.join(removed)}"
