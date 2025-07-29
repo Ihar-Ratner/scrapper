@@ -349,15 +349,15 @@ async def get_wb_product_details_by_articule(art: str) -> dict:
         
         try:
             # Navigate to page with more reliable wait strategy
-            await page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             
             # Wait for either the title or price to appear (whichever comes first)
             try:
                 await page.wait_for_selector(".product-page__title, .price-block__final-price", 
-                                           timeout=10000, state="visible")
+                                           timeout=20000, state="visible")
             except:
                 # If that fails, just wait a bit
-                await asyncio.sleep(3)
+                await asyncio.sleep(5)
             
             # Wait a bit for dynamic content to load
             await asyncio.sleep(2)
@@ -376,7 +376,7 @@ async def get_wb_product_details_by_articule(art: str) -> dict:
             product_name = None
             for selector in name_selectors:
                 try:
-                    element = await page.wait_for_selector(selector, timeout=3000)
+                    element = await page.wait_for_selector(selector, timeout=5000)
                     product_name = await element.text_content()
                     if product_name and product_name.strip():
                         break
@@ -573,23 +573,62 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
 async def help_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await start(update, ctx)
 
-
 async def add_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     """
     /add <id> or /add <id1,id2,id3> or /add id1 id2
+    Only allows numeric article IDs
     """
     user_id = update.effective_user.id
     raw     = " ".join(ctx.args).strip()
     if not raw:
-        return await update.message.reply_text("Usage: /add <art1,art2 …>")
+        return await update.message.reply_text("Usage: /add <art1,art2 …>\n⚠️ Only numeric article IDs are allowed.")
 
     parts    = re.split(r"[,\s;]+", raw)
-    new_ids  = [p for p in (pt.strip() for pt in parts) if p]
-    added, skipped = append_articules_for(user_id, new_ids)
+    new_ids  = [p.strip() for pt in parts if (p := pt.strip())]
+    
+    # Validate that all IDs are numeric
+    invalid_ids = []
+    valid_ids = []
+    
+    for art_id in new_ids:
+        if art_id.isdigit():
+            valid_ids.append(art_id)
+        else:
+            invalid_ids.append(art_id)
+    
+    # Report invalid IDs
+    if invalid_ids:
+        error_msg = f"❌ Invalid article IDs (must be numbers only): {', '.join(invalid_ids)}"
+        if valid_ids:
+            error_msg += f"\n✅ Valid IDs will still be processed: {', '.join(valid_ids)}"
+        return await update.message.reply_text(error_msg)
+    
+    # Process valid IDs
+    if not valid_ids:
+        return await update.message.reply_text("❌ No valid numeric article IDs provided.")
+    
+    added, skipped = append_articules_for(user_id, valid_ids)
 
     await update.message.reply_text(
         f"✅ Added {added} articule(s), skipped {skipped} duplicates."
     )
+
+# async def add_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+#     """
+#     /add <id> or /add <id1,id2,id3> or /add id1 id2
+#     """
+#     user_id = update.effective_user.id
+#     raw     = " ".join(ctx.args).strip()
+#     if not raw:
+#         return await update.message.reply_text("Usage: /add <art1,art2 …>")
+
+#     parts    = re.split(r"[,\s;]+", raw)
+#     new_ids  = [p for p in (pt.strip() for pt in parts) if p]
+#     added, skipped = append_articules_for(user_id, new_ids)
+
+#     await update.message.reply_text(
+#         f"✅ Added {added} articule(s), skipped {skipped} duplicates."
+#     )
 
 async def scrape_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -689,14 +728,78 @@ async def show_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     ]
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
 
+# async def remove_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+#     user_id = update.effective_user.id
+#     raw     = " ".join(ctx.args).strip()
+#     if not raw:
+#         return await update.message.reply_text("Usage: /remove <art1,art2 …>")
+
+#     parts     = re.split(r"[,\s;]+", raw)
+#     to_remove = {p.strip() for p in parts if p.strip()}
+
+#     existing = load_articules_for(user_id)
+#     if not existing:
+#         return await update.message.reply_text("❗ No articules to remove.")
+
+#     kept, removed = [], []
+#     for art in existing:
+#         if art in to_remove:
+#             removed.append(art)
+#         else:
+#             kept.append(art)
+
+#     if not removed:
+#         return await update.message.reply_text(
+#             f"ℹ️ None of {', '.join(to_remove)} found."
+#         )
+
+#     articules_file, results_file = user_paths(user_id)
+#     articules_file.write_text("\n".join(kept) + "\n", encoding="utf-8")
+
+#     if results_file.exists():
+#         data = load_results_for(user_id)
+#         data = [item for item in data if item["articule"] not in to_remove]
+#         save_results_for(user_id, data)
+
+#     await update.message.reply_text(
+#         f"✅ Removed {len(removed)} articule(s): {', '.join(removed)}"
+#     )
+
 async def remove_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """
+    /remove <art1,art2,…> or /remove art1 art2
+    Only allows numeric article IDs
+    """
     user_id = update.effective_user.id
     raw     = " ".join(ctx.args).strip()
     if not raw:
-        return await update.message.reply_text("Usage: /remove <art1,art2 …>")
+        return await update.message.reply_text("Usage: /remove <art1,art2 …>\n⚠️ Only numeric article IDs are allowed.")
 
     parts     = re.split(r"[,\s;]+", raw)
-    to_remove = {p.strip() for p in parts if p.strip()}
+    to_remove_raw = {p.strip() for p in parts if p.strip()}
+    
+    # Validate that all IDs are numeric
+    invalid_ids = []
+    valid_ids = []
+    
+    for art_id in to_remove_raw:
+        if art_id.isdigit():
+            valid_ids.append(art_id)
+        else:
+            invalid_ids.append(art_id)
+    
+    # Report invalid IDs
+    if invalid_ids:
+        error_msg = f"❌ Invalid article IDs (must be numbers only): {', '.join(invalid_ids)}"
+        if valid_ids:
+            error_msg += f"\n✅ Valid IDs will still be processed: {', '.join(valid_ids)}"
+        return await update.message.reply_text(error_msg)
+    
+    # Process valid IDs
+    if not valid_ids:
+        return await update.message.reply_text("❌ No valid numeric article IDs provided.")
+    
+    to_remove = set(valid_ids)
 
     existing = load_articules_for(user_id)
     if not existing:
@@ -711,7 +814,7 @@ async def remove_command(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if not removed:
         return await update.message.reply_text(
-            f"ℹ️ None of {', '.join(to_remove)} found."
+            f"ℹ️ None of {', '.join(to_remove)} found in your tracking list."
         )
 
     articules_file, results_file = user_paths(user_id)
