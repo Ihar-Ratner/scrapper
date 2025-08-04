@@ -268,3 +268,52 @@ class CommandHandlers:
                 text="\n".join(messages),
                 parse_mode=ParseMode.HTML
             )
+
+    # Add to your existing CommandHandlers class
+
+    async def cache_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Handle /cache command - show cache statistics and management"""
+        
+        async def show_cache_stats():
+            """Helper function to show cache statistics"""
+            try:
+                stats = await self.price_monitor.get_cache_stats()
+                
+                stats_text = (
+                    f"📊 <b>Cache Statistics</b>\n\n"
+                    f"🔄 Memory cache: {stats['memory_cache_size']} items\n"
+                    f" Disk cache: {stats['disk_cache_files']} files\n"
+                    f"✅ Cache hits: {stats['hits']}\n"
+                    f"❌ Cache misses: {stats['misses']}\n"
+                    f" Hit rate: {stats['hit_rate_percent']}%\n"
+                    f"️ Evictions: {stats['evictions']}\n"
+                    f"📊 Total requests: {stats['total_requests']}\n\n"
+                    f"Commands:\n"
+                    f"• /cache clear - Clear all cache"
+                )
+                
+                await update.message.reply_text(stats_text, parse_mode=ParseMode.HTML)
+            except Exception as e:
+                await update.message.reply_text(f"❌ Error getting cache stats: {str(e)}")
+        
+        # Handle different commands
+        if not ctx.args:
+            # Show cache stats
+            await show_cache_stats()
+            return
+        
+        if ctx.args[0] == "clear":
+            # Clear cache
+            try:
+                await self.price_monitor.clear_cache()
+                await update.message.reply_text("🗑️ Cache cleared successfully!")
+            except Exception as e:
+                await update.message.reply_text(f"❌ Error clearing cache: {str(e)}")
+            return
+        
+        # Invalid command
+        await update.message.reply_text(
+            "Usage: /cache [clear]\n"
+            "• /cache - Show cache statistics\n"
+            "• /cache clear - Clear all cache"
+        )
