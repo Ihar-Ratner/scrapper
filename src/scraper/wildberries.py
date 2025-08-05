@@ -3,6 +3,7 @@ import logging
 from typing import Optional, Dict
 from datetime import datetime
 from ..models.product import Product
+from ..services.exceptions import ProductNotFoundError, NetworkError
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,8 @@ class WildberriesScraper:
                         pass
                     
                 if not product_name:
-                    raise Exception(f"Product name not found for {articule}")
+                    #raise Exception(f"Product name not found for {articule}")
+                    raise ProductNotFoundError(f"Product name not found for {articule}", articule)
                 
                 # Wait for price with multiple selectors
                 price_selectors = [
@@ -146,7 +148,8 @@ class WildberriesScraper:
                     page_content = await page.content()
                     logger.error(f"Price not found for {articule}. Page title: {await page.title()}")
                     logger.error(f"Page URL: {page.url}")
-                    raise Exception(f"Price not found for {articule}")
+                    #raise Exception(f"Price not found for {articule}")
+                    raise ProductNotFoundError(f"Price not found for {articule}", articule)
                 
                 logger.info(f"Successfully scraped {articule}: {product_name.strip()} - {final_price.strip()}")
                 

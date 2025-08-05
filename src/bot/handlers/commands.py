@@ -9,6 +9,8 @@ from ...services.validation import validate_article_ids
 from ...services.subscription import SubscriptionService
 from ...storage.file_storage import FileStorage
 from ...config.settings import settings
+from ...services.exceptions import *
+from ...services.error_handler import ErrorHandler
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,7 @@ class CommandHandlers:
         self.price_monitor = price_monitor
         self.storage = storage
         self.subscription_service = subscription_service
+        self.error_handler = ErrorHandler()  # Add this
     
     async def start_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /start command - exact copy from your working telegram_message.py"""
@@ -40,6 +43,10 @@ class CommandHandlers:
             text,
             parse_mode=ParseMode.MARKDOWN_V2
         )
+
+    async def errors_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        """Show error statistics"""
+        stats = self.error_handler.get_error_stats()
 
     async def add_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /add command with article existence validation"""
@@ -86,7 +93,11 @@ class CommandHandlers:
                     existing_articles.append(articule)
                 else:
                     non_existing_articles.append(articule)
-                    
+
+            except ValidationError as e:
+                error_msg = self.error_handler.handle_bot_error(e, user_id)
+                await update.message.reply_text(error_msg)
+                non_existing_articles.append(articule)                    
             except Exception as e:
                 logger.error(f"Error validating article {articule}: {e}")
                 non_existing_articles.append(articule)
