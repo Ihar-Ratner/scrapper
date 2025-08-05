@@ -302,3 +302,11 @@ class PriceMonitor:
         except Exception as e:
             logger.error(f"Error in price monitoring for user {user_id}: {e}")
             return [self.error_handler.handle_bot_error(e, user_id)]
+
+    async def get_cache_stats(self) -> dict[str, any]:
+        """Get cache statistics"""
+        return self.cache_manager.get_stats()
+    
+    async def clear_cache(self) -> None:
+        """Clear all cache entries"""
+        await self.cache_manager.clear_all()
