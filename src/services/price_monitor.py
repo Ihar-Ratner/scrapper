@@ -7,6 +7,7 @@ from ..models.product import Product
 from ..storage.file_storage import FileStorage
 from ..scraper.wildberries import WildberriesScraper
 from .cache_manager import CacheManager
+from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,8 @@ class PriceMonitor:
                     logger.error(f"Error parsing old price for {item.get('articule', 'unknown')}: {e}")
                     old_map[item["articule"]] = 0.0
             
-            # Concurrent processing with rate limiting
-            semaphore = asyncio.Semaphore(3)  # Limit concurrent requests
+            # Concurrent processing with rate limiting using settings
+            semaphore = asyncio.Semaphore(settings.scraping.max_concurrent_requests)
             
             async def process_article(articule: str):
                 """Process a single article with caching"""
@@ -70,7 +71,9 @@ class PriceMonitor:
                             return cached_product, "cached"
                         else:
                             # Scrape fresh data with rate limiting
-                            await asyncio.sleep(1)  # Rate limiting
+                            #await asyncio.sleep(1)  # Rate limiting
+                            # Scrape fresh data with rate limiting from settings
+                            await asyncio.sleep(settings.scraping.rate_limit_delay)
                             logger.info(f"User {user_id}: Scraping {articule}")
                             product = await self.scraper.get_product_details(articule)
                             

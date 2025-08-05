@@ -9,42 +9,69 @@ from src.services.price_monitor import PriceMonitor
 from src.services.subscription import SubscriptionService
 from src.services.cache_manager import CacheManager
 from src.bot.handlers.commands import CommandHandlers
+from src.config.settings import settings  # Import settings
 
-# Setup logging
+# # Setup logging
+# logging.basicConfig(
+#     format="%(asctime)s %(name)s %(levelname)s %(message)s",
+#     level=logging.INFO
+# )
+
+# Setup logging using settings
 logging.basicConfig(
     format="%(asctime)s %(name)s %(levelname)s %(message)s",
-    level=logging.INFO
+    level=getattr(logging, settings.log_level),
+    # Uncomment for logging to file
+    #filename=settings.log_file
 )
 
 async def main():
     try:
-        # Initialize components
+        # Validate required settings
+        if not settings.telegram_token:
+            print("Error: TELEGRAM_TOKEN environment variable not set")
+            return
+
+        # # Initialize components
+        # storage = FileStorage()
+        # browser_pool = BrowserPool(max_browsers=3)
+        # await browser_pool.initialize()
+
+        # Initialize components using settings
         storage = FileStorage()
-        browser_pool = BrowserPool(max_browsers=3)
+        browser_pool = BrowserPool(max_browsers=settings.max_browsers)
         await browser_pool.initialize()
 
-        # Initialize cache manager
+        # # Initialize cache manager
+        # cache_manager = CacheManager(
+        #     memory_cache_size=500,  # Store 500 products in memory
+        #     cache_ttl_minutes=15,   # Cache for 15 minutes
+        #     disk_cache_enabled=True, # Enable disk cache
+        #     cache_dir="cache"        # Cache directory
+        # )
+
+        # Initialize cache manager using settings
         cache_manager = CacheManager(
-            memory_cache_size=500,  # Store 500 products in memory
-            cache_ttl_minutes=15,   # Cache for 15 minutes
-            disk_cache_enabled=True, # Enable disk cache
-            cache_dir="cache"        # Cache directory
+            memory_cache_size=settings.cache.memory_cache_size,
+            cache_ttl_minutes=settings.cache.cache_ttl_minutes,
+            disk_cache_enabled=settings.cache.disk_cache_enabled,
+            cache_dir=settings.cache.cache_dir
         )
         
         scraper = WildberriesScraper(browser_pool)
-        price_monitor = PriceMonitor(storage, scraper)
+        price_monitor = PriceMonitor(storage, scraper, cache_manager)
         subscription_service = SubscriptionService()
         
         # Initialize command handlers - FIX: Use the created instance
         handlers = CommandHandlers(price_monitor, storage, subscription_service)
         
-        # Initialize bot
-        token = os.getenv("TELEGRAM_TOKEN")
-        if not token:
-            print("Error: TELEGRAM_TOKEN environment variable not set")
-            return
+        # # Initialize bot
+        # token = os.getenv("TELEGRAM_TOKEN")
+        # if not token:
+        #     print("Error: TELEGRAM_TOKEN environment variable not set")
+        #     return
         
-        app = Application.builder().token(token).build()
+        app = Application.builder().token(settings.telegram_token).build()
         
         # Add handlers
         app.add_handler(CommandHandler("start", handlers.start_command))
@@ -64,6 +91,7 @@ async def main():
         await app.updater.start_polling()
         
         print("Bot started successfully! ��")
+        print(f"Configuration: {settings.max_browsers} browsers, {settings.cache.memory_cache_size} cache items")
 
          # Start cache cleanup task
         asyncio.create_task(cache_cleanup_task(cache_manager))
@@ -85,7 +113,8 @@ async def cache_cleanup_task(cache_manager: CacheManager):
     """Periodic cache cleanup task"""
     while True:
         try:
-            await asyncio.sleep(300)  # Run every 5 minutes
+            #await asyncio.sleep(300)  # Run every 5 minutes
+            await asyncio.sleep(settings.cache.cleanup_interval_minutes * 60)
             await cache_manager.clear_expired()
         except Exception as e:
             logging.error(f"Cache cleanup error: {e}")

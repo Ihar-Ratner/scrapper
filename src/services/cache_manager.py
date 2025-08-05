@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, asdict
 from ..models.product import Product
+from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,22 +46,22 @@ class CacheManager:
     """Multi-level caching system for product data"""
     
     def __init__(self, 
-                 memory_cache_size: int = 1000,
-                 cache_ttl_minutes: int = 10,
-                 disk_cache_enabled: bool = True,
-                 cache_dir: str = "cache"):
+                 memory_cache_size: int = None,
+                 cache_ttl_minutes: int = None,
+                 disk_cache_enabled: bool = None,
+                 cache_dir: str = None):
         
         # Memory cache (fastest)
         self._memory_cache: Dict[str, CacheEntry] = {}
-        self._memory_cache_size = memory_cache_size
+        self._memory_cache_size = memory_cache_size or settings.cache.memory_cache_size
         
         # Disk cache (persistent)
-        self._disk_cache_enabled = disk_cache_enabled
-        self._cache_dir = Path(cache_dir)
+        self._disk_cache_enabled = disk_cache_enabled if disk_cache_enabled is not None else settings.cache.disk_cache_enabled
+        self._cache_dir = Path(cache_dir or settings.cache.cache_dir)
         self._cache_dir.mkdir(exist_ok=True)
         
         # Cache settings
-        self._cache_ttl = timedelta(minutes=cache_ttl_minutes)
+        self._cache_ttl = timedelta(minutes=cache_ttl_minutes or settings.cache.cache_ttl_minutes)
         
         # Statistics
         self._hits = 0

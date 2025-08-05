@@ -8,6 +8,7 @@ from ...services.price_monitor import PriceMonitor
 from ...services.validation import validate_article_ids
 from ...services.subscription import SubscriptionService
 from ...storage.file_storage import FileStorage
+from ...config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +281,8 @@ class CommandHandlers:
         self.subscription_service.save_subscribers(subs)
         
         intervals = self.subscription_service.load_intervals()
-        interval = intervals.get(str(user_id), 300)
+        #interval = intervals.get(str(user_id), 300)
+        interval = intervals.get(str(user_id), settings.bot.default_interval)
         self.subscription_service.schedule_compare_for(user_id, ctx.job_queue, interval, self.broadcast_one_user)
         
         await update.message.reply_text(f"🟢 Subscribed! You'll get updates every {interval//60} min.")

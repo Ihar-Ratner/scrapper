@@ -3,6 +3,7 @@ from typing import Dict, Set
 from telegram.ext import JobQueue
 from ..services.price_monitor import PriceMonitor
 from ..storage.file_storage import FileStorage
+from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,8 @@ class Scheduler:
             intervals = self.load_intervals()
             
             for user_id in subs:
-                interval = intervals.get(str(user_id), 300)  # Default 5 minutes
+                #interval = intervals.get(str(user_id), 300)  # Default 5 
+                interval = intervals.get(str(user_id), settings.bot.default_interval)
                 self.schedule_compare_for(user_id, interval)
                 logger.info(f"Restored job for user {user_id} with interval {interval}s")
                 
