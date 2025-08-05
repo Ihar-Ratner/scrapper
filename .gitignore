@@ -1,9 +1,8 @@
 venv/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+*.py[cod]
+*$py.class
+*.so
 *.json
 *articules.txt
 *subscribers.txt
