@@ -1,5 +1,6 @@
 import logging
 import re
+import asyncio  # Add this import
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
@@ -38,16 +39,16 @@ class CommandHandlers:
             text,
             parse_mode=ParseMode.MARKDOWN_V2
         )
-    
+
     async def add_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Handle /add command"""
+        """Handle /add command with article existence validation"""
         user_id = update.effective_user.id
         
         if not ctx.args:
             await update.message.reply_text("Usage: /add <article_id1> <article_id2> ...")
             return
         
-        # Validate article IDs
+        # Validate article IDs format
         article_ids = " ".join(ctx.args).split()
         valid_ids, invalid_ids = validate_article_ids(article_ids)
         
@@ -62,7 +63,7 @@ class CommandHandlers:
             await update.message.reply_text("❌ No valid article IDs provided.")
             return
         
-        # Add articles
+        # Check which articles are already tracked
         current_articules = self.storage.load_articules_for(user_id)
         new_articules = [aid for aid in valid_ids if aid not in current_articules]
         
@@ -70,13 +71,84 @@ class CommandHandlers:
             await update.message.reply_text("ℹ️ All articles are already tracked.")
             return
         
-        # Save new articules
-        all_articules = current_articules + new_articules
-        self.storage.save_articules_for(user_id, all_articules)
+        # Validate article existence on Wildberries
+        await update.message.reply_text("🔍 Validating articles... This may take a moment.")
         
-        await update.message.reply_text(
-            f"✅ Added {len(new_articules)} article(s): {', '.join(new_articules)}"
-        )
+        existing_articles = []
+        non_existing_articles = []
+        
+        # Check each article for existence
+        for articule in new_articules:
+            try:
+                # Use the new existence check method
+                if await self.price_monitor.scraper.check_product_exists(articule):
+                    existing_articles.append(articule)
+                else:
+                    non_existing_articles.append(articule)
+                    
+            except Exception as e:
+                logger.error(f"Error validating article {articule}: {e}")
+                non_existing_articles.append(articule)
+            
+            # Rate limiting between checks
+            await asyncio.sleep(1)
+        
+        # Report results
+        messages = []
+        
+        if existing_articles:
+            # Add existing articles to tracking
+            all_articules = current_articules + existing_articles
+            self.storage.save_articules_for(user_id, all_articules)
+            messages.append(f"✅ Added {len(existing_articles)} article(s): {', '.join(existing_articles)}")
+        
+        if non_existing_articles:
+            messages.append(f"❌ Articles not found: {', '.join(non_existing_articles)}")
+        
+        # Send results
+        if messages:
+            await update.message.reply_text("\n".join(messages))
+        else:
+            await update.message.reply_text("ℹ️ No valid articles to add.")
+    
+    # async def add_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    #     """Handle /add command"""
+    #     user_id = update.effective_user.id
+        
+    #     if not ctx.args:
+    #         await update.message.reply_text("Usage: /add <article_id1> <article_id2> ...")
+    #         return
+        
+    #     # Validate article IDs
+    #     article_ids = " ".join(ctx.args).split()
+    #     valid_ids, invalid_ids = validate_article_ids(article_ids)
+        
+    #     if invalid_ids:
+    #         error_msg = f"❌ Invalid article IDs (numbers only): {', '.join(invalid_ids)}"
+    #         if valid_ids:
+    #             error_msg += f"\n✅ Valid IDs will be processed: {', '.join(valid_ids)}"
+    #         await update.message.reply_text(error_msg)
+    #         return
+        
+    #     if not valid_ids:
+    #         await update.message.reply_text("❌ No valid article IDs provided.")
+    #         return
+        
+    #     # Add articles
+    #     current_articules = self.storage.load_articules_for(user_id)
+    #     new_articules = [aid for aid in valid_ids if aid not in current_articules]
+        
+    #     if not new_articules:
+    #         await update.message.reply_text("ℹ️ All articles are already tracked.")
+    #         return
+        
+    #     # Save new articules
+    #     all_articules = current_articules + new_articules
+    #     self.storage.save_articules_for(user_id, all_articules)
+        
+    #     await update.message.reply_text(
+    #         f"✅ Added {len(new_articules)} article(s): {', '.join(new_articules)}"
+    #     )
     
     async def show_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /show command - exact match to your working version"""
