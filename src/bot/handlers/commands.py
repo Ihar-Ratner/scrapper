@@ -11,6 +11,7 @@ from ...storage.file_storage import FileStorage
 from ...config.settings import settings
 from ...services.exceptions import *
 from ...services.error_handler import ErrorHandler
+from ...storage.database_manager import DatabaseManager
 
 logger = logging.getLogger(__name__)
 
@@ -20,27 +21,47 @@ class CommandHandlers:
         self.storage = storage
         self.subscription_service = subscription_service
         self.error_handler = ErrorHandler()  # Add this
+        self.db_manager = DatabaseManager()
     
     async def start_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /start command - exact copy from your working telegram_message.py"""
-        user = update.effective_user
-        text = (
-            f"Hi {user.mention_markdown_v2()}\\!  \n"
-            "To start using this bot, you have to prepare your data:\n"
-            "1\\. Add product with `add` command\n"
-            "2\\. Execute `check` command to collect data about interested product\n"
-            "3\\. Read instructions below to manage your tracking list\n\n\n"
-            "Send `/check <articule>` to fetch product details\\.\n"
-            "`/add <id1,id2,…>` to add new articules\\.\n"
-            "`/remove <art1,art2,…> or /remove art1 art2` to remove some products from you tracking list\\.\n"
-            "`/show` to get articule: product name that you are currently tracking\\.\n"
-            "`/compare` to compare latest prices with current ones\\.\n"
-            "`/subscribe` to start product tracking \\(default value is evey 5 mins\\)\\.\n"
-            "`/unsubscribe` to stop product tracking\\.\n"
-            "`/setinterval <minutes>` to set up your own tracking interval if you are subscribed\\.\n"
+        #user = update.effective_user
+        user_id = update.effective_user.id
+        username = update.effective_user.username
+        user = self.db_manager.get_or_create_user(user_id, username)
+
+        welcome_text = (
+            "🎉 Welcome to Wildberries Price Monitor!\n\n"
+            "Commands:\n"
+            "• /add <article_id> - Add product to track\n"
+            "• /show - Show tracked products\n"
+            "• /check - Check current prices\n"
+            "• /compare - Compare with previous prices\n"
+            "• /remove <article_id> - Remove product\n"
+            "• /subscribe - Start periodic updates\n"
+            "• /unsubscribe - Stop periodic updates\n"
+            "• /setinterval <minutes> - Set update interval\n"
+            "• /cache - Show cache statistics\n"
+            "• /help - Show this help"
         )
+
+        # text = (
+        #     f"Hi {user.mention_markdown_v2()}\\!  \n"
+        #     "To start using this bot, you have to prepare your data:\n"
+        #     "1\\. Add product with `add` command\n"
+        #     "2\\. Execute `check` command to collect data about interested product\n"
+        #     "3\\. Read instructions below to manage your tracking list\n\n\n"
+        #     "Send `/check <articule>` to fetch product details\\.\n"
+        #     "`/add <id1,id2,…>` to add new articules\\.\n"
+        #     "`/remove <art1,art2,…> or /remove art1 art2` to remove some products from you tracking list\\.\n"
+        #     "`/show` to get articule: product name that you are currently tracking\\.\n"
+        #     "`/compare` to compare latest prices with current ones\\.\n"
+        #     "`/subscribe` to start product tracking \\(default value is evey 5 mins\\)\\.\n"
+        #     "`/unsubscribe` to stop product tracking\\.\n"
+        #     "`/setinterval <minutes>` to set up your own tracking interval if you are subscribed\\.\n"
+        # )
         await update.message.reply_text(
-            text,
+            welcome_text,
             parse_mode=ParseMode.MARKDOWN_V2
         )
 
@@ -50,7 +71,10 @@ class CommandHandlers:
 
     async def add_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /add command with article existence validation"""
+        #user_id = update.effective_user.id
         user_id = update.effective_user.id
+        username = update.effective_user.username
+        user = self.db_manager.get_or_create_user(user_id, username)
         
         if not ctx.args:
             await update.message.reply_text("Usage: /add <article_id1> <article_id2> ...")
@@ -164,7 +188,10 @@ class CommandHandlers:
     
     async def show_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /show command - exact match to your working version"""
+        #user_id = update.effective_user.id
         user_id = update.effective_user.id
+        username = update.effective_user.username
+        user = self.db_manager.get_or_create_user(user_id, username)
         results = self.storage.load_results_for(user_id)
         
         if not results:
@@ -179,7 +206,10 @@ class CommandHandlers:
     
     async def check_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /check command"""
+        #user_id = update.effective_user.id
         user_id = update.effective_user.id
+        username = update.effective_user.username
+        user = self.db_manager.get_or_create_user(user_id, username)
         await update.message.reply_text(" Checking prices... This may take a moment.")
         
         try:
@@ -198,7 +228,10 @@ class CommandHandlers:
     
     async def compare_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /compare command"""
+        #user_id = update.effective_user.id
         user_id = update.effective_user.id
+        username = update.effective_user.username
+        user = self.db_manager.get_or_create_user(user_id, username)
         await update.message.reply_text("🔄 Comparing prices... This may take a moment.")
         
         try:
@@ -217,7 +250,10 @@ class CommandHandlers:
     
     async def remove_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /remove command - exact match to your working version"""
+        #user_id = update.effective_user.id
         user_id = update.effective_user.id
+        username = update.effective_user.username
+        user = self.db_manager.get_or_create_user(user_id, username)
         raw = " ".join(ctx.args).strip()
         
         if not raw:
@@ -282,7 +318,10 @@ class CommandHandlers:
             f"✅ Removed {len(removed)} articule(s): {', '.join(removed)}"
         )    
     async def subscribe_command(self, update, ctx):
+        #user_id = update.effective_user.id
         user_id = update.effective_user.id
+        username = update.effective_user.username
+        user = self.db_manager.get_or_create_user(user_id, username)
         subs = self.subscription_service.load_subscribers()
         
         if user_id in subs:
@@ -299,21 +338,36 @@ class CommandHandlers:
         await update.message.reply_text(f"🟢 Subscribed! You'll get updates every {interval//60} min.")
     
     async def unsubscribe_command(self, update, ctx):
+        """Handle /unsubscribe command"""
         user_id = update.effective_user.id
+        username = update.effective_user.username
+        user = self.db_manager.get_or_create_user(user_id, username)
+        
+        # Load current subscribers
         subs = self.subscription_service.load_subscribers()
         
         if user_id not in subs:
             return await update.message.reply_text("ℹ️ You're not subscribed.")
         
+        # Remove user from subscribers list (file-based)
         subs.remove(user_id)
         self.subscription_service.save_subscribers(subs)
         
+        # 🔑 FIX: Update database subscription status
+        self.db_manager.remove_subscription(user_id)  # ← This sets is_active = False
+        
+        # Remove scheduled job
         for job in ctx.job_queue.get_jobs_by_name(f"compare_{user_id}"):
             job.schedule_removal()
         
         await update.message.reply_text("🔴 Unsubscribed from periodic updates.")
     
     async def setinterval_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+        #user_id = update.effective_user.id
+        user_id = update.effective_user.id
+        username = update.effective_user.username
+        user = self.db_manager.get_or_create_user(user_id, username)
+
         try:
             if not ctx.args:
                 return await update.message.reply_text("Usage: /setinterval <minutes>")

@@ -10,12 +10,9 @@ from src.services.subscription import SubscriptionService
 from src.services.cache_manager import CacheManager
 from src.bot.handlers.commands import CommandHandlers
 from src.config.settings import settings  # Import settings
-
-# # Setup logging
-# logging.basicConfig(
-#     format="%(asctime)s %(name)s %(levelname)s %(message)s",
-#     level=logging.INFO
-# )
+from src.storage.database_storage import DatabaseStorage
+from src.storage.database_manager import DatabaseManager
+from src.bot.scheduler import Scheduler  # Add this import back
 
 # Setup logging using settings
 logging.basicConfig(
@@ -32,23 +29,16 @@ async def main():
             print("Error: TELEGRAM_TOKEN environment variable not set")
             return
 
-        # # Initialize components
-        # storage = FileStorage()
-        # browser_pool = BrowserPool(max_browsers=3)
-        # await browser_pool.initialize()
 
         # Initialize components using settings
-        storage = FileStorage()
+        #storage = FileStorage()
+        storage = DatabaseStorage()
         browser_pool = BrowserPool(max_browsers=settings.max_browsers)
         await browser_pool.initialize()
 
-        # # Initialize cache manager
-        # cache_manager = CacheManager(
-        #     memory_cache_size=500,  # Store 500 products in memory
-        #     cache_ttl_minutes=15,   # Cache for 15 minutes
-        #     disk_cache_enabled=True, # Enable disk cache
-        #     cache_dir="cache"        # Cache directory
-        # )
+        
+        # Initialize database manager
+        db_manager = DatabaseManager()
 
         # Initialize cache manager using settings
         cache_manager = CacheManager(
@@ -60,18 +50,15 @@ async def main():
         
         scraper = WildberriesScraper(browser_pool)
         price_monitor = PriceMonitor(storage, scraper, cache_manager)
-        subscription_service = SubscriptionService()
+        subscription_service = SubscriptionService(db_manager)
         
         # Initialize command handlers - FIX: Use the created instance
         handlers = CommandHandlers(price_monitor, storage, subscription_service)
         
-        # # Initialize bot
-        # token = os.getenv("TELEGRAM_TOKEN")
-        # if not token:
-        #     print("Error: TELEGRAM_TOKEN environment variable not set")
-        #     return
-        
         app = Application.builder().token(settings.telegram_token).build()
+
+        # Initialize scheduler with database manager
+        scheduler = Scheduler(app.job_queue, price_monitor, db_manager)
         
         # Add handlers
         app.add_handler(CommandHandler("start", handlers.start_command))
@@ -84,6 +71,12 @@ async def main():
         app.add_handler(CommandHandler("unsubscribe", handlers.unsubscribe_command))
         app.add_handler(CommandHandler("setinterval", handlers.setinterval_command))
         app.add_handler(CommandHandler("cache", handlers.cache_command))
+
+        # Restore scheduled jobs
+        await scheduler.restore_jobs()
+
+        # Start cache cleanup task
+        asyncio.create_task(cache_cleanup_task(cache_manager))
         
         # Start bot
         await app.initialize()

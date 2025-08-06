@@ -2,27 +2,27 @@ import logging
 from typing import Dict, Set
 from telegram.ext import JobQueue
 from ..services.price_monitor import PriceMonitor
-from ..storage.file_storage import FileStorage
+from ..storage.database_manager import DatabaseManager
 from ..config.settings import settings
 
 logger = logging.getLogger(__name__)
 
 class Scheduler:
-    def __init__(self, job_queue: JobQueue, price_monitor: PriceMonitor, storage: FileStorage):
+    def __init__(self, job_queue: JobQueue, price_monitor: PriceMonitor, db_manager: DatabaseManager):
         self.job_queue = job_queue
         self.price_monitor = price_monitor
-        self.storage = storage
+        self.db_manager = db_manager
     
     async def restore_jobs(self):
-        """Restore scheduled jobs for existing subscribers"""
+        """Restore scheduled jobs for existing subscribers from database"""
         try:
-            # Load subscribers and intervals
-            subs = self.load_subscribers()
-            intervals = self.load_intervals()
+            # Load active subscriptions from database
+            active_subscriptions = self.db_manager.get_active_subscriptions()
             
-            for user_id in subs:
-                #interval = intervals.get(str(user_id), 300)  # Default 5 
-                interval = intervals.get(str(user_id), settings.bot.default_interval)
+            for subscription in active_subscriptions:
+                user_id = subscription.user_id
+                interval = subscription.interval_seconds
+                
                 self.schedule_compare_for(user_id, interval)
                 logger.info(f"Restored job for user {user_id} with interval {interval}s")
                 
@@ -88,50 +88,3 @@ class Scheduler:
                 )
             except:
                 pass
-    
-    def load_subscribers(self) -> Set[int]:
-        """Load list of subscribed users"""
-        try:
-            subs_file = Path("subscribers.txt")
-            if not subs_file.exists():
-                return set()
-            
-            with open(subs_file, "r") as f:
-                return {int(line.strip()) for line in f if line.strip()}
-        except Exception as e:
-            logger.error(f"Error loading subscribers: {e}")
-            return set()
-    
-    def save_subscribers(self, subs: Set[int]) -> None:
-        """Save list of subscribed users"""
-        try:
-            with open("subscribers.txt", "w") as f:
-                for user_id in subs:
-                    f.write(f"{user_id}\n")
-        except Exception as e:
-            logger.error(f"Error saving subscribers: {e}")
-    
-    def load_intervals(self) -> Dict[str, int]:
-        """Load user intervals"""
-        try:
-            intervals_file = Path("intervals.json")
-            if not intervals_file.exists():
-                return {}
-            
-            import json
-            with open(intervals_file, "r") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.error(f"Error loading intervals: {e}")
-            return {}
-    
-    def save_intervals(self, intervals: Dict[str, int]) -> None:
-        """Save user intervals"""
-        try:
-            import json
-            with open("intervals.json", "w") as f:
-                json.dump(intervals, f)
-        except Exception as e:
-            logger.error(f"Error saving intervals: {e}")
-
-from pathlib import Path
