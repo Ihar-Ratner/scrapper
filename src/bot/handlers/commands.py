@@ -1,13 +1,17 @@
 import logging
 import re
-import asyncio  # Add this import
+import asyncio
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ParseMode
 from ...services.price_monitor import PriceMonitor
 from ...services.validation import validate_article_ids
 from ...services.subscription import SubscriptionService
-from ...storage.file_storage import FileStorage
+from ...storage.database_storage import DatabaseStorage
+#from telegram.ext import Application, CommandHandler
+#from src.scraper.browser_pool import BrowserPool
+from src.scraper.wildberries import WildberriesScraper
+from ...services.cache_manager import CacheManager
 from ...config.settings import settings
 from ...services.exceptions import *
 from ...services.error_handler import ErrorHandler
@@ -16,36 +20,39 @@ from ...storage.database_manager import DatabaseManager
 logger = logging.getLogger(__name__)
 
 class CommandHandlers:
-    def __init__(self, price_monitor: PriceMonitor, storage: FileStorage, subscription_service: SubscriptionService):
+    def __init__(self, price_monitor: PriceMonitor, storage: DatabaseStorage, subscription_service: SubscriptionService):
         self.price_monitor = price_monitor
         self.storage = storage
         self.subscription_service = subscription_service
-        self.error_handler = ErrorHandler()  # Add this
+        self.error_handler = ErrorHandler()
         self.db_manager = DatabaseManager()
     
-    async def start_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    async def help_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /start command - exact copy from your working telegram_message.py"""
-        #user = update.effective_user
         user_id = update.effective_user.id
         username = update.effective_user.username
         user = self.db_manager.get_or_create_user(user_id, username)
 
         welcome_text = (
-            "🎉 Welcome to Wildberries Price Monitor!\n\n"
+            "🎉 Welcome to Wildberries Price Monitor\\!\n\n"
+            "To start using this bot, you have to prepare your data:\n\n"
+            "1\\. Add product with `add` command\n"
+            "2\\. Execute `check` command to collect data about interested product\n"
+            "3\\. Read instructions below to manage your tracking list\n\n\n"
             "Commands:\n"
-            "• /add <article_id> - Add product to track\n"
-            "• /show - Show tracked products\n"
-            "• /check - Check current prices\n"
-            "• /compare - Compare with previous prices\n"
-            "• /remove <article_id> - Remove product\n"
-            "• /subscribe - Start periodic updates\n"
-            "• /unsubscribe - Stop periodic updates\n"
-            "• /setinterval <minutes> - Set update interval\n"
-            "• /cache - Show cache statistics\n"
-            "• /help - Show this help"
+            "• /add <article_id\\> \\- Add product to track\n"
+            "• /show \\- Show tracked products\n"
+            "• /check \\- Check current prices\n"
+            "• /compare \\- Compare with previous prices\n"
+            "• /remove <article_id\\> \\- Remove product\n"
+            "• /subscribe \\- Start periodic updates\n"
+            "• /unsubscribe \\- Stop periodic updates\n"
+            "• /setinterval <minutes\\> \\- Set update interval\n"
+            "• /cache \\- Show cache statistics\n"
+            "• /help \\- Show this help"
         )
 
-        # text = (
+        # welcome_text = (
         #     f"Hi {user.mention_markdown_v2()}\\!  \n"
         #     "To start using this bot, you have to prepare your data:\n"
         #     "1\\. Add product with `add` command\n"
@@ -146,45 +153,6 @@ class CommandHandlers:
             await update.message.reply_text("\n".join(messages))
         else:
             await update.message.reply_text("ℹ️ No valid articles to add.")
-    
-    # async def add_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    #     """Handle /add command"""
-    #     user_id = update.effective_user.id
-        
-    #     if not ctx.args:
-    #         await update.message.reply_text("Usage: /add <article_id1> <article_id2> ...")
-    #         return
-        
-    #     # Validate article IDs
-    #     article_ids = " ".join(ctx.args).split()
-    #     valid_ids, invalid_ids = validate_article_ids(article_ids)
-        
-    #     if invalid_ids:
-    #         error_msg = f"❌ Invalid article IDs (numbers only): {', '.join(invalid_ids)}"
-    #         if valid_ids:
-    #             error_msg += f"\n✅ Valid IDs will be processed: {', '.join(valid_ids)}"
-    #         await update.message.reply_text(error_msg)
-    #         return
-        
-    #     if not valid_ids:
-    #         await update.message.reply_text("❌ No valid article IDs provided.")
-    #         return
-        
-    #     # Add articles
-    #     current_articules = self.storage.load_articules_for(user_id)
-    #     new_articules = [aid for aid in valid_ids if aid not in current_articules]
-        
-    #     if not new_articules:
-    #         await update.message.reply_text("ℹ️ All articles are already tracked.")
-    #         return
-        
-    #     # Save new articules
-    #     all_articules = current_articules + new_articules
-    #     self.storage.save_articules_for(user_id, all_articules)
-        
-    #     await update.message.reply_text(
-    #         f"✅ Added {len(new_articules)} article(s): {', '.join(new_articules)}"
-    #     )
     
     async def show_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /show command - exact match to your working version"""
@@ -407,8 +375,6 @@ class CommandHandlers:
                 text="\n".join(messages),
                 parse_mode=ParseMode.HTML
             )
-
-    # Add to your existing CommandHandlers class
 
     async def cache_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /cache command - show cache statistics and management"""

@@ -4,15 +4,14 @@ import os
 from telegram.ext import Application, CommandHandler
 from src.scraper.browser_pool import BrowserPool
 from src.scraper.wildberries import WildberriesScraper
-from src.storage.file_storage import FileStorage
 from src.services.price_monitor import PriceMonitor
 from src.services.subscription import SubscriptionService
 from src.services.cache_manager import CacheManager
 from src.bot.handlers.commands import CommandHandlers
-from src.config.settings import settings  # Import settings
+from src.config.settings import settings
 from src.storage.database_storage import DatabaseStorage
 from src.storage.database_manager import DatabaseManager
-from src.bot.scheduler import Scheduler  # Add this import back
+from src.bot.scheduler import Scheduler
 
 # Setup logging using settings
 logging.basicConfig(
@@ -31,7 +30,6 @@ async def main():
 
 
         # Initialize components using settings
-        #storage = FileStorage()
         storage = DatabaseStorage()
         browser_pool = BrowserPool(max_browsers=settings.max_browsers)
         await browser_pool.initialize()
@@ -61,7 +59,7 @@ async def main():
         scheduler = Scheduler(app.job_queue, price_monitor, db_manager)
         
         # Add handlers
-        app.add_handler(CommandHandler("start", handlers.start_command))
+        app.add_handler(CommandHandler("help", handlers.help_command))
         app.add_handler(CommandHandler("add", handlers.add_command))
         app.add_handler(CommandHandler("show", handlers.show_command))
         app.add_handler(CommandHandler("check", handlers.check_command))

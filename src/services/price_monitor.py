@@ -4,7 +4,7 @@ import re
 from typing import List, Optional
 from datetime import datetime
 from ..models.product import Product
-from ..storage.file_storage import FileStorage
+from ..storage.database_storage import DatabaseStorage
 from ..scraper.wildberries import WildberriesScraper
 from .cache_manager import CacheManager
 from ..config.settings import settings
@@ -31,7 +31,7 @@ def parse_price(price_str: str) -> float:
         return 0.0
 
 class PriceMonitor:
-    def __init__(self, storage: FileStorage, scraper: WildberriesScraper, cache_manager: CacheManager = None):
+    def __init__(self, storage: DatabaseStorage, scraper: WildberriesScraper, cache_manager: CacheManager = None):
         self.storage = storage
         self.scraper = scraper
         self.cache_manager = cache_manager or CacheManager()
