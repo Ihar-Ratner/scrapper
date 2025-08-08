@@ -370,3 +370,20 @@ class DatabaseManager:
             raise
         finally:
             self.close_session(session)
+
+    def get_user_last_interval(self, user_id: int) -> Optional[int]:
+        """Get user's last interval (even if subscription is inactive)"""
+        session = self.get_session()
+        try:
+            subscription = session.query(Subscription).filter(
+                Subscription.user_id == user_id
+            ).first()
+            
+            if subscription and subscription.interval_seconds != settings.bot.default_interval:
+                return subscription.interval_seconds
+            return None
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting user last interval: {e}")
+            return None
+        finally:
+            self.close_session(session)

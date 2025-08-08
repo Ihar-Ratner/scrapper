@@ -63,7 +63,6 @@ async def main():
         app.add_handler(CommandHandler("add", handlers.add_command))
         app.add_handler(CommandHandler("show", handlers.show_command))
         app.add_handler(CommandHandler("check", handlers.check_command))
-        app.add_handler(CommandHandler("compare", handlers.compare_command))
         app.add_handler(CommandHandler("remove", handlers.remove_command))
         app.add_handler(CommandHandler("subscribe", handlers.subscribe_command))
         app.add_handler(CommandHandler("unsubscribe", handlers.unsubscribe_command))

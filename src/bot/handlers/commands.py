@@ -8,8 +8,6 @@ from ...services.price_monitor import PriceMonitor
 from ...services.validation import validate_article_ids
 from ...services.subscription import SubscriptionService
 from ...storage.database_storage import DatabaseStorage
-#from telegram.ext import Application, CommandHandler
-#from src.scraper.browser_pool import BrowserPool
 from src.scraper.wildberries import WildberriesScraper
 from ...services.cache_manager import CacheManager
 from ...config.settings import settings
@@ -43,7 +41,6 @@ class CommandHandlers:
             "• /add <article_id\\> \\- Add product to track\n"
             "• /show \\- Show tracked products\n"
             "• /check \\- Check current prices\n"
-            "• /compare \\- Compare with previous prices\n"
             "• /remove <article_id\\> \\- Remove product\n"
             "• /subscribe \\- Start periodic updates\n"
             "• /unsubscribe \\- Stop periodic updates\n"
@@ -52,21 +49,6 @@ class CommandHandlers:
             "• /help \\- Show this help"
         )
 
-        # welcome_text = (
-        #     f"Hi {user.mention_markdown_v2()}\\!  \n"
-        #     "To start using this bot, you have to prepare your data:\n"
-        #     "1\\. Add product with `add` command\n"
-        #     "2\\. Execute `check` command to collect data about interested product\n"
-        #     "3\\. Read instructions below to manage your tracking list\n\n\n"
-        #     "Send `/check <articule>` to fetch product details\\.\n"
-        #     "`/add <id1,id2,…>` to add new articules\\.\n"
-        #     "`/remove <art1,art2,…> or /remove art1 art2` to remove some products from you tracking list\\.\n"
-        #     "`/show` to get articule: product name that you are currently tracking\\.\n"
-        #     "`/compare` to compare latest prices with current ones\\.\n"
-        #     "`/subscribe` to start product tracking \\(default value is evey 5 mins\\)\\.\n"
-        #     "`/unsubscribe` to stop product tracking\\.\n"
-        #     "`/setinterval <minutes>` to set up your own tracking interval if you are subscribed\\.\n"
-        # )
         await update.message.reply_text(
             welcome_text,
             parse_mode=ParseMode.MARKDOWN_V2
@@ -194,28 +176,6 @@ class CommandHandlers:
         except Exception as e:
             await update.message.reply_text(f"❌ Error during price check: {str(e)}")
     
-    async def compare_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Handle /compare command"""
-        #user_id = update.effective_user.id
-        user_id = update.effective_user.id
-        username = update.effective_user.username
-        user = self.db_manager.get_or_create_user(user_id, username)
-        await update.message.reply_text("🔄 Comparing prices... This may take a moment.")
-        
-        try:
-            messages = await self.price_monitor.check_prices_for_user(user_id)
-            
-            if len(messages) > 1:
-                # Send messages in chunks to avoid length limits
-                for i in range(0, len(messages), 5):
-                    chunk = messages[i:i+5]
-                    await update.message.reply_text("\n".join(chunk), parse_mode=ParseMode.HTML)
-            else:
-                await update.message.reply_text(messages[0], parse_mode=ParseMode.HTML)
-                
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error during comparison: {str(e)}")
-    
     async def remove_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /remove command - exact match to your working version"""
         #user_id = update.effective_user.id
@@ -285,26 +245,33 @@ class CommandHandlers:
         await update.message.reply_text(
             f"✅ Removed {len(removed)} articule(s): {', '.join(removed)}"
         )    
+
     async def subscribe_command(self, update, ctx):
-        #user_id = update.effective_user.id
         user_id = update.effective_user.id
         username = update.effective_user.username
         user = self.db_manager.get_or_create_user(user_id, username)
-        subs = self.subscription_service.load_subscribers()
         
+        # Check if already subscribed
+        subs = self.subscription_service.load_subscribers()
         if user_id in subs:
             return await update.message.reply_text("✅ Already subscribed.")
         
+        # Get user's last custom interval (even if inactive)
+        last_interval = self.db_manager.get_user_last_interval(user_id)
+        if last_interval and last_interval != settings.bot.default_interval:
+            interval = last_interval
+            message = f"🟢 Subscribed with your last custom interval! You'll get updates every {interval//60} min."
+        else:
+            interval = settings.bot.default_interval
+            message = f"🟢 Subscribed! You'll get updates every {interval//60} min."
+        
+        # Subscribe
         subs.add(user_id)
         self.subscription_service.save_subscribers(subs)
-        
-        intervals = self.subscription_service.load_intervals()
-        #interval = intervals.get(str(user_id), 300)
-        interval = intervals.get(str(user_id), settings.bot.default_interval)
         self.subscription_service.schedule_compare_for(user_id, ctx.job_queue, interval, self.broadcast_one_user)
         
-        await update.message.reply_text(f"🟢 Subscribed! You'll get updates every {interval//60} min.")
-    
+        await update.message.reply_text(message)
+
     async def unsubscribe_command(self, update, ctx):
         """Handle /unsubscribe command"""
         user_id = update.effective_user.id
