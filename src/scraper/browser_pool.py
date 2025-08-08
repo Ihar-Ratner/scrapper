@@ -8,12 +8,9 @@ from ..config.settings import settings
 logger = logging.getLogger(__name__)
 
 class BrowserPool:
-    # def __init__(self, max_browsers: int = 3):
     def __init__(self, max_browsers: int = None):
         self.max_browsers = max_browsers or settings.max_browsers
-        #self.max_browsers = max_browsers
         self.browsers: list[Browser] = []
-        #self.semaphore = asyncio.Semaphore(max_browsers)
         self.semaphore = asyncio.Semaphore(self.max_browsers)
         self.playwright = None
         self._initialized = False

@@ -54,13 +54,8 @@ class CommandHandlers:
             parse_mode=ParseMode.MARKDOWN_V2
         )
 
-    async def errors_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        """Show error statistics"""
-        stats = self.error_handler.get_error_stats()
-
     async def add_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /add command with article existence validation"""
-        #user_id = update.effective_user.id
         user_id = update.effective_user.id
         username = update.effective_user.username
         user = self.db_manager.get_or_create_user(user_id, username)
@@ -138,7 +133,6 @@ class CommandHandlers:
     
     async def show_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /show command - exact match to your working version"""
-        #user_id = update.effective_user.id
         user_id = update.effective_user.id
         username = update.effective_user.username
         user = self.db_manager.get_or_create_user(user_id, username)
@@ -156,7 +150,6 @@ class CommandHandlers:
     
     async def check_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /check command"""
-        #user_id = update.effective_user.id
         user_id = update.effective_user.id
         username = update.effective_user.username
         user = self.db_manager.get_or_create_user(user_id, username)
@@ -178,7 +171,6 @@ class CommandHandlers:
     
     async def remove_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         """Handle /remove command - exact match to your working version"""
-        #user_id = update.effective_user.id
         user_id = update.effective_user.id
         username = update.effective_user.username
         user = self.db_manager.get_or_create_user(user_id, username)
@@ -298,7 +290,7 @@ class CommandHandlers:
         await update.message.reply_text("🔴 Unsubscribed from periodic updates.")
     
     async def setinterval_command(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-        #user_id = update.effective_user.id
+
         user_id = update.effective_user.id
         username = update.effective_user.username
         user = self.db_manager.get_or_create_user(user_id, username)

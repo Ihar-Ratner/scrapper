@@ -71,9 +71,6 @@ async def main():
 
         # Restore scheduled jobs
         await scheduler.restore_jobs()
-
-        # Start cache cleanup task
-        asyncio.create_task(cache_cleanup_task(cache_manager))
         
         # Start bot
         await app.initialize()
@@ -103,7 +100,6 @@ async def cache_cleanup_task(cache_manager: CacheManager):
     """Periodic cache cleanup task"""
     while True:
         try:
-            #await asyncio.sleep(300)  # Run every 5 minutes
             await asyncio.sleep(settings.cache.cleanup_interval_minutes * 60)
             await cache_manager.clear_expired()
         except Exception as e:

@@ -148,7 +148,6 @@ class WildberriesScraper:
                     page_content = await page.content()
                     logger.error(f"Price not found for {articule}. Page title: {await page.title()}")
                     logger.error(f"Page URL: {page.url}")
-                    #raise Exception(f"Price not found for {articule}")
                     raise ProductNotFoundError(f"Price not found for {articule}", articule)
                 
                 logger.info(f"Successfully scraped {articule}: {product_name.strip()} - {final_price.strip()}")
