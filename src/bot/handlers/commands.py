@@ -225,18 +225,34 @@ class CommandHandlers:
                 f"ℹ️ None of {', '.join(to_remove)} found in your tracking list."
             )
             return
-        
-        # Save updated articules
+
+        # 1. Update tracking list (Article table)
         self.storage.save_articules_for(user_id, kept)
         
-        # Also remove from results
-        results = self.storage.load_results_for(user_id)
-        results = [item for item in results if item["articule"] not in to_remove]
-        self.storage.save_results_for(user_id, results)
+        # 2. Clean up price history (ProductPrice table) - NEW!
+        for articule in removed:
+            self.db_manager.remove_product_prices(user_id, articule)
+        
+        # 3. Clean up cache entries (CacheEntry table) - NEW!
+        for articule in removed:
+            self.db_manager.remove_cache_entries(articule)
         
         await update.message.reply_text(
-            f"✅ Removed {len(removed)} articule(s): {', '.join(removed)}"
-        )    
+            f"✅ Removed {len(removed)} articule(s): {', '.join(removed)}\n"
+            f"🗑️ Cleaned up price history and cache data."
+        )
+
+        # # Save updated articules
+        # self.storage.save_articules_for(user_id, kept)
+        
+        # # Also remove from results
+        # results = self.storage.load_results_for(user_id)
+        # results = [item for item in results if item["articule"] not in to_remove]
+        # self.storage.save_results_for(user_id, results)
+        
+        # await update.message.reply_text(
+        #     f"✅ Removed {len(removed)} articule(s): {', '.join(removed)}"
+        # )    
 
     async def subscribe_command(self, update, ctx):
         user_id = update.effective_user.id

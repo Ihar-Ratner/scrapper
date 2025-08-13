@@ -387,3 +387,36 @@ class DatabaseManager:
             return None
         finally:
             self.close_session(session)
+
+    def remove_product_prices(self, user_id: int, articule: str) -> int:
+        """Remove all price history for a specific article and user"""
+        session = self.get_session()
+        try:
+            deleted_count = session.query(ProductPrice).filter(
+                ProductPrice.user_id == user_id,
+                ProductPrice.articule == articule
+            ).delete()
+            session.commit()
+            return deleted_count
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"Error removing product prices: {e}")
+            raise
+        finally:
+            self.close_session(session)
+
+    def remove_cache_entries(self, articule: str) -> int:
+        """Remove cache entries for a specific article"""
+        session = self.get_session()
+        try:
+            deleted_count = session.query(CacheEntry).filter(
+                CacheEntry.articule == articule
+            ).delete()
+            session.commit()
+            return deleted_count
+        except SQLAlchemyError as e:
+            session.rollback()
+            logger.error(f"Error removing cache entries: {e}")
+            raise
+        finally:
+            self.close_session(session)

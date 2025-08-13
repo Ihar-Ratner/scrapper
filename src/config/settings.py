@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 from pathlib import Path
 
@@ -60,10 +60,10 @@ class Settings:
     enable_metrics: bool = False
     
     # Configuration objects
-    cache: CacheConfig = CacheConfig()
-    scraping: ScrapingConfig = ScrapingConfig()
-    bot: BotConfig = BotConfig()
-    database: DatabaseConfig = DatabaseConfig()
+    cache: CacheConfig = field(default_factory=CacheConfig)
+    scraping: ScrapingConfig = field(default_factory=ScrapingConfig)
+    bot: BotConfig = field(default_factory=BotConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
     
     @property
     def database_url(self) -> str:
