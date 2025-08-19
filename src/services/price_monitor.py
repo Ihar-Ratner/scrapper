@@ -135,8 +135,8 @@ class PriceMonitor:
                         messages.append(
                             f"ℹ️ {product.product_name[:50]}: {old_price:.2f} → <b>{new_price:.2f}</b> ({sign}{diff:.2f})"
                         )
-                    else:
-                        messages.append(f"ℹ️ {product.product_name[:50]}: unchanged at <b>{new_price:.2f}</b>")
+                    # else:
+                    #     messages.append(f"ℹ️ {product.product_name[:50]}: unchanged at <b>{new_price:.2f}</b>")
             
             # Log cache statistics
             logger.info(f"User {user_id}: Cache hits={cache_hits}, misses={cache_misses}")
@@ -159,7 +159,15 @@ class PriceMonitor:
                     logger.error(f"Error saving results for user {user_id}: {e}")
                     messages.append("⚠️ Some results may not be saved due to storage error.")
             
-            return messages if messages else ["ℹ️ No price changes detected."]
+            # return messages if messages else ["ℹ️ No price changes detected."]
+            # At the end, replace line 162 with:
+            if not messages:
+                if not new_products:
+                    return ["❌ Unable to check any products. All requests failed."]
+                else:
+                    return []  # ✅ Return empty list = no message sent (silent)
+            else:
+                return messages  # ✅ Return actual change messages
             
         except Exception as e:
             logger.error(f"Error in price monitoring for user {user_id}: {e}")

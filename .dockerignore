@@ -1,0 +1,12 @@
+pg_data/
+cache/
+docker/
+docker-compose.yaml
+Dockerfile*
+.dockerignore
+.env
+.gitignore
+logs/
+myenv/
+scripts/
+venv/

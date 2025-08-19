@@ -157,14 +157,17 @@ class CommandHandlers:
         
         try:
             messages = await self.price_monitor.check_prices_for_user(user_id)
-            
-            if len(messages) > 1:
-                # Send messages in chunks to avoid length limits
-                for i in range(0, len(messages), 5):
-                    chunk = messages[i:i+5]
-                    await update.message.reply_text("\n".join(chunk), parse_mode=ParseMode.HTML)
-            else:
-                await update.message.reply_text(messages[0], parse_mode=ParseMode.HTML)
+
+            #Only send messages if the list is not empty
+            if messages:  # This will be False for empty list []
+                if len(messages) > 1:
+                    # Send messages in chunks to avoid length limits
+                    for i in range(0, len(messages), 5):
+                        chunk = messages[i:i+5]
+                        await update.message.reply_text("\n".join(chunk), parse_mode=ParseMode.HTML)
+                else:
+                    await update.message.reply_text(messages[0], parse_mode=ParseMode.HTML)
+            # If messages is empty [], nothing gets sent - silent check!
                 
         except Exception as e:
             await update.message.reply_text(f"❌ Error during price check: {str(e)}")

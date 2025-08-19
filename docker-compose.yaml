@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/compose-spec/compose-spec/master/schema/compose-spec.json
+services:
+  db:
+    # image: postgres:16.10-alpine3.22
+    build:
+      context: ./docker/postgres
+      dockerfile: Dockerfile
+    container_name: wb_db
+    environment:
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_USER=wb_bot
+      - POSTGRES_DB=wb
+    volumes:
+      - pg_data:/var/lib/postgresql/data 
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wb_bot -d wb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  wb_bot:
+    # build: .
+    build:
+      context: .
+      dockerfile: docker/wb_bot/Dockerfile
+    container_name: wb_bot
+    volumes:
+      - ./cache/:/app/cache
+      - ./logs/:/app/logs
+    environment:
+      - TELEGRAM_TOKEN=${TELEGRAM_TOKEN}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=wb
+      - DB_USER=wb_bot
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pg_data:
