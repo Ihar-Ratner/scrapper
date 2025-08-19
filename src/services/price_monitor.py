@@ -38,7 +38,7 @@ class PriceMonitor:
         self.error_handler = ErrorHandler()
     
     @handle_errors
-    async def check_prices_for_user(self, user_id: int) -> List[str]:
+    async def check_prices_for_user(self, user_id: int, is_manual_check: bool = False) -> List[str]:
         """Check prices for a specific user with enhanced error handling"""
         try:
             # Load user's tracked articles
@@ -165,7 +165,10 @@ class PriceMonitor:
                 if not new_products:
                     return ["❌ Unable to check any products. All requests failed."]
                 else:
-                    return []  # ✅ Return empty list = no message sent (silent)
+                    if is_manual_check:
+                        return ["ℹ️ All prices checked - no changes detected."]
+                    else:
+                        return []  # ✅ Return empty list = no message sent (silent)
             else:
                 return messages  # ✅ Return actual change messages
             

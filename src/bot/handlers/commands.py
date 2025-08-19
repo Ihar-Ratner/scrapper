@@ -156,7 +156,7 @@ class CommandHandlers:
         await update.message.reply_text(" Checking prices... This may take a moment.")
         
         try:
-            messages = await self.price_monitor.check_prices_for_user(user_id)
+            messages = await self.price_monitor.check_prices_for_user(user_id, is_manual_check=True)
 
             #Only send messages if the list is not empty
             if messages:  # This will be False for empty list []

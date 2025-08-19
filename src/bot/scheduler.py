@@ -53,7 +53,7 @@ class Scheduler:
         logger.info(f"Starting scheduled comparison for user {user_id}")
         
         try:
-            messages = await self.price_monitor.check_prices_for_user(user_id)
+            messages = await self.price_monitor.check_prices_for_user(user_id, is_manual_check=False)
             
             # Filter for price changes only
             price_change_messages = []
